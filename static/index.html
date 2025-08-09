@@ -3,20 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Permissions-Policy" content="camera=()">
     <title>Curry Thickness Detector</title>
-    <base href="/static/">
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-        #video { width: 100%; max-width: 640px; border: 1px solid #ddd; }
-        #result { margin-top: 20px; font-size: 24px; }
-        button { padding: 10px 20px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .tab-container {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        .tab {
+            padding: 10px 20px;
+            background: #ddd;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        .tab.active {
+            background: #4CAF50;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        #video, #maskCanvas {
+            width: 100%;
+            max-width: 640px;
+            border: 1px solid #ddd;
+        }
+        #result {
+            font-size: 24px;
+            margin: 20px 0;
+            padding: 10px;
+            background: #f0f0f0;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-right: 10px;
+        }
     </style>
 </head>
 <body>
     <h1>Curry Thickness Detector</h1>
-    <video id="video" autoplay playsinline></video>
+    <div id="result">Thickness: --%</div>
+    
+    <div class="tab-container">
+        <div class="tab active" onclick="switchTab('original')">Original</div>
+        <div class="tab" onclick="switchTab('mask')">Mask</div>
+    </div>
+    
+    <div class="tab-content active" id="originalTab">
+        <video id="video" autoplay playsinline></video>
+    </div>
+    
+    <div class="tab-content" id="maskTab">
+        <canvas id="maskCanvas"></canvas>
+    </div>
+    
     <button id="capture">Analyze</button>
-    <div id="result">Press 'Analyze' to check thickness</div>
+    <button onclick="testConnection()">Test Connection</button>
+    
     <script src="script.js"></script>
 </body>
 </html>
