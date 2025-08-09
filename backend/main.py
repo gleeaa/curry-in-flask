@@ -58,4 +58,4 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close()
 
 # For serving static files in production
-app.mount("/", StaticFiles(directory="../frontend", html=True), name="static")
+app.mount("/", StaticFiles(directory="../static", html=True), name="static")
