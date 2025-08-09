@@ -1,84 +1,125 @@
 import cv2
 import numpy as np
+from scipy import ndimage
+from skimage import feature, filters
 
-class CurryDetector:
+class AdvancedCurryDetector:
     def __init__(self):
-        self.curry_profiles = {
-            'yellow': {'lower': np.array([15, 100, 100]), 'upper': np.array([25, 255, 255])},
-            'red': {'lower': [np.array([0, 100, 100]), np.array([170, 100, 100])], 
-                   'upper': [np.array([10, 255, 255]), np.array([180, 255, 255])]},
-            'green': {'lower': np.array([40, 80, 80]), 'upper': np.array([80, 255, 255])},
-            'brown': {'lower': np.array([10, 50, 50]), 'upper': np.array([20, 200, 200])}
+        # Color ranges for different curry types
+        self.color_profiles = {
+            'yellow': {'lower': np.array([20, 100, 100]), 'upper': np.array([30, 255, 255])},
+            'red': {'lower': np.array([0, 100, 100]), 'upper': np.array([10, 255, 255])},
+            'brown': {'lower': np.array([10, 60, 60]), 'upper': np.array([20, 160, 160])}
         }
-    
-    def detect_curry(self, frame):
-        # Resize for processing
-        frame = cv2.resize(frame, (640, 480))
+        
+        # Texture analysis parameters
+        self.texture_params = {
+            'gloss_threshold': 200,  # Value for reflection detection
+            'grain_size': 3,         # For particle analysis
+            'viscosity_factor': 0.7  # Weight for flow pattern analysis
+        }
+
+    def analyze_thickness(self, frame):
+        # Convert to HSV for better color analysis
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        best_mask = None
-        max_coverage = 0
+        # 1. Color-based segmentation
+        color_mask = self._get_color_mask(hsv)
+        color_coverage = np.sum(color_mask) / color_mask.size
         
-        for color, profile in self.curry_profiles.items():
-            if color == 'red':
-                mask = cv2.inRange(hsv, profile['lower'][0], profile['upper'][0]) | \
-                       cv2.inRange(hsv, profile['lower'][1], profile['upper'][1])
-            else:
-                mask = cv2.inRange(hsv, profile['lower'], profile['upper'])
-            
-            coverage = cv2.countNonZero(mask)
-            if coverage > max_coverage:
-                max_coverage = coverage
-                best_mask = mask
+        # 2. Reflection analysis (glossiness)
+        reflection_ratio = self._analyze_reflections(gray)
         
-        return best_mask
-    
-    def calculate_thickness(self, frame):
-        best_mask = self.detect_curry(frame)
-        thickness_mask = cv2.bitwise_and(frame, frame, mask=best_mask)
-        gray = cv2.cvtColor(thickness_mask, cv2.COLOR_BGR2GRAY)
+        # 3. Texture and grain analysis
+        texture_score = self._analyze_texture(gray)
         
-        _, reflection_mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+        # 4. Flow pattern analysis (viscosity)
+        viscosity_score = self._analyze_viscosity(gray)
         
-        total_pixels = cv2.countNonZero(best_mask)
-        reflection_pixels = cv2.countNonZero(reflection_mask)
+        # Combine factors with weighted average
+        thickness_score = (
+            0.4 * color_coverage + 
+            0.2 * (1 - reflection_ratio) + 
+            0.3 * texture_score + 
+            0.1 * viscosity_score
+        )
         
-        base_coverage = (total_pixels / best_mask.size) * 100
-        reflection_factor = (reflection_pixels / total_pixels) if total_pixels > 0 else 0
+        # Convert to percentage (0-100 scale)
+        final_percentage = np.clip(thickness_score * 100, 0, 100)
         
-        if base_coverage < 5:
-            thickness = "Very Thin"
-            coverage_percentage = base_coverage * 0.8
-        elif base_coverage < 20:
-            thickness = "Thin layer"
-            coverage_percentage = base_coverage * 0.9
-        elif base_coverage < 50:
-            thickness = "Medium layer"
-            coverage_percentage = base_coverage * 1.1
-        elif base_coverage < 80:
-            thickness = "Thick layer"
-            coverage_percentage = min(100, base_coverage * 1.3)
-        else:
-            thickness = "Very Thick layer"
-            coverage_percentage = min(100, base_coverage * 1.5)
-        
-        if thickness in ["Thick layer", "Very Thick layer"]:
-            reflection_adjustment = 1 - (reflection_factor * 0.3)
-        else:
-            reflection_adjustment = 1 - (reflection_factor * 0.7)
-        
-        final_percentage = min(100, coverage_percentage * reflection_adjustment)
-        
-        # Convert frame and masks to JPEG
-        _, frame_jpeg = cv2.imencode('.jpg', frame)
-        _, mask_jpeg = cv2.imencode('.jpg', best_mask)
-        _, reflection_jpeg = cv2.imencode('.jpg', reflection_mask)
+        # Generate visualization masks
+        vis_masks = self._generate_visualizations(frame, color_mask, gray)
         
         return {
-            'percentage': round(final_percentage, 2),
-            'thickness': thickness,
-            'reflection_ratio': round(reflection_factor, 2),
-            'frame': frame_jpeg.tobytes(),
-            'mask': mask_jpeg.tobytes(),
-            'reflection_mask': reflection_jpeg.tobytes()
+            'percentage': round(float(final_percentage), 2),
+            'masks': vis_masks,
+            'metrics': {
+                'color_coverage': round(float(color_coverage * 100), 2),
+                'reflection_ratio': round(float(reflection_ratio * 100), 2),
+                'texture_score': round(float(texture_score * 100), 2),
+                'viscosity_score': round(float(viscosity_score * 100), 2)
+            }
+        }
+
+    def _get_color_mask(self, hsv):
+        combined_mask = np.zeros((hsv.shape[0], hsv.shape[1]), dtype=np.uint8)
+        for _, profile in self.color_profiles.items():
+            if isinstance(profile['lower'], list):
+                # Handle red color range (wraps around 0)
+                mask1 = cv2.inRange(hsv, profile['lower'][0], profile['upper'][0])
+                mask2 = cv2.inRange(hsv, profile['lower'][1], profile['upper'][1])
+                mask = mask1 | mask2
+            else:
+                mask = cv2.inRange(hsv, profile['lower'], profile['upper'])
+            combined_mask = cv2.bitwise_or(combined_mask, mask)
+        
+        # Apply morphological operations
+        kernel = np.ones((5,5), np.uint8)
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
+        return combined_mask
+
+    def _analyze_reflections(self, gray):
+        # Detect specular highlights
+        _, reflection_mask = cv2.threshold(gray, self.texture_params['gloss_threshold'], 255, cv2.THRESH_BINARY)
+        reflection_area = np.sum(reflection_mask > 0)
+        return reflection_area / reflection_mask.size
+
+    def _analyze_texture(self, gray):
+        # Analyze grain patterns using edge detection
+        edges = feature.canny(gray, sigma=2)
+        
+        # Calculate density of particles
+        labeled, num_features = ndimage.label(edges)
+        particle_density = num_features / gray.size
+        
+        # Normalize to 0-1 range
+        return 1 - np.exp(-particle_density * 100)
+
+    def _analyze_viscosity(self, gray):
+        # Detect flow patterns using oriented gradients
+        gx = filters.sobel_h(gray)
+        gy = filters.sobel_v(gray)
+        magnitude = np.sqrt(gx**2 + gy**2)
+        
+        # Viscous liquids have more uniform flow patterns
+        flow_uniformity = np.std(magnitude) / 255
+        return self.texture_params['viscosity_factor'] * (1 - flow_uniformity)
+
+    def _generate_visualizations(self, frame, color_mask, gray):
+        # Create color mask visualization
+        color_vis = cv2.bitwise_and(frame, frame, mask=color_mask)
+        
+        # Create reflection visualization
+        _, reflection_mask = cv2.threshold(gray, self.texture_params['gloss_threshold'], 255, cv2.THRESH_BINARY)
+        reflection_vis = cv2.cvtColor(reflection_mask, cv2.COLOR_GRAY2BGR)
+        
+        # Create texture visualization
+        edges = feature.canny(gray, sigma=2)
+        texture_vis = cv2.cvtColor((edges * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+        
+        return {
+            'color_mask': color_vis,
+            'reflection_mask': reflection_vis,
+            'texture_mask': texture_vis
         }
